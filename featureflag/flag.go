@@ -10,6 +10,7 @@ const (
 	ReasonUnknownFlag      Reason = "unknown_flag"      // 引用了不存在的开关
 	ReasonInvalidRule      Reason = "invalid_rule"      // 规则本身非法
 	ReasonPriorityConflict Reason = "priority_conflict" // 同一开关下规则优先级冲突
+	ReasonUnknownVersion   Reason = "unknown_version"   // 按版本重放时引用了不存在/未保留的规则版本
 )
 
 // Error 描述开关相关错误。

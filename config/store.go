@@ -14,12 +14,22 @@ type Store struct {
 
 	mu      sync.Mutex // 仅保护更新（Reload）串行化
 	current atomic.Pointer[Snapshot]
+	events  *broker // 变更通知：仅在实际生效后发布
+
+	historyKeep int                  // 保留的历史版本数（不含当前版本）
+	history     map[uint64]*Snapshot // 最近若干已生效版本，超出上限淘汰最老
 }
 
 // NewStore 用给定 schema 与来源（按优先级从低到高）构建 Store，
 // 并立即执行一次加载；加载失败返回错误。
 func NewStore(schema Schema, sources ...Source) (*Store, error) {
-	s := &Store{schema: schema, sources: append([]Source(nil), sources...)}
+	s := &Store{
+		schema:      schema,
+		sources:     append([]Source(nil), sources...),
+		events:      newBroker(),
+		historyKeep: DefaultHistoryKeep,
+		history:     map[uint64]*Snapshot{},
+	}
 	if err := s.Reload(); err != nil {
 		return nil, err
 	}
@@ -30,7 +40,7 @@ func NewStore(schema Schema, sources ...Source) (*Store, error) {
 func (s *Store) Snapshot() *Snapshot { return s.current.Load() }
 
 // Reload 重新从所有来源加载并校验配置，全部成功才原子切换；
-// 任一来源失败或校验失败则整体放弃，保留旧配置。
+// 任一来源失败或校验失败则整体放弃，保留旧配置，且不产生任何变更通知。
 func (s *Store) Reload() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -39,8 +49,22 @@ func (s *Store) Reload() error {
 	if err != nil {
 		return err // 旧快照保持不变
 	}
-	s.current.Store(snap)
+	s.activate(snap, false)
 	return nil
+}
+
+// activate 把一份已校验的快照原子切换为当前生效配置，
+// 把被替换下来的旧版本收入历史，并向订阅方发布变更通知。
+// 调用方须持有 s.mu。
+func (s *Store) activate(snap *Snapshot, rollback bool) {
+	old := s.current.Load()
+	s.current.Store(snap)
+	s.recordHistoryLocked(old)
+	s.events.publish(Event{
+		Snapshot: snap,
+		Changes:  diffSnapshots(s.schema, old, snap),
+		Rollback: rollback,
+	})
 }
 
 // build 加载、合并并校验全部来源，产出新快照；不修改当前状态。
@@ -90,7 +114,7 @@ func (s *Store) build() (*Snapshot, error) {
 	if old := s.current.Load(); old != nil {
 		version = old.Version + 1
 	}
-	return &Snapshot{Version: version, values: values}, nil
+	return &Snapshot{Version: version, values: values, origins: origin}, nil
 }
 
 // String 输出当前快照（敏感字段脱敏）。

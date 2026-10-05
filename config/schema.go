@@ -34,12 +34,19 @@ type Schema map[string]Field
 type Snapshot struct {
 	Version uint64
 	values  map[string]any
+	origins map[string]string // 每个键最终生效的来源名
 }
 
 // Get 读取配置键，返回 (值, 是否存在)。
 func (s *Snapshot) Get(key string) (any, bool) {
 	v, ok := s.values[key]
 	return v, ok
+}
+
+// Origin 返回该键最终生效的来源名；键不存在时返回空串与 false。
+func (s *Snapshot) Origin(key string) (string, bool) {
+	o, ok := s.origins[key]
+	return o, ok
 }
 
 // MustString 读取字符串键，不存在或类型不符时 panic（仅用于已校验配置）。
