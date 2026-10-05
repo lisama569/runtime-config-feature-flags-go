@@ -34,6 +34,27 @@ type Schema map[string]Field
 type Snapshot struct {
 	Version uint64
 	values  map[string]any
+	origin  map[string]string // 每个键最终生效的来源；回滚克隆时一并保留
+}
+
+// Origin 返回指定键最终生效的来源名称；键不存在时返回空串与 false。
+func (s *Snapshot) Origin(key string) (string, bool) {
+	src, ok := s.origin[key]
+	return src, ok
+}
+
+// cloneForRollback 深拷贝快照内容用于回滚：内容与来源映射沿用当时那份，
+// 版本号清零，由 commitLocked 重新分配为当前版本 +1。
+func (s *Snapshot) cloneForRollback() *Snapshot {
+	values := make(map[string]any, len(s.values))
+	for k, v := range s.values {
+		values[k] = v
+	}
+	origin := make(map[string]string, len(s.origin))
+	for k, v := range s.origin {
+		origin[k] = v
+	}
+	return &Snapshot{values: values, origin: origin}
 }
 
 // Get 读取配置键，返回 (值, 是否存在)。
